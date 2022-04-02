@@ -1,7 +1,7 @@
 # Synth80
 
 **Synth80** is a toy FM synthesiser which runs in the browser. It was developed by
-[Fleabit](fleabit.dev) in March 2022 as a portfolio piece.
+[Fleabit](https://fleabit.dev) in March 2022 as a portfolio piece.
 
 **To build**: see `./build.py --help`
 
