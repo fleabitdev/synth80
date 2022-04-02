@@ -1,0 +1,1619 @@
+@use "sass:math";
+
+/*
+@font-face rules
+*/
+
+@font-face {
+    font-family: "Roboto Subset";
+    font-weight: 400;
+    src: url("./roboto-regular.subset.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Roboto Subset";
+    font-weight: 500;
+    src: url("./roboto-medium.subset.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "HD44780";
+    ascent-override: 130%;
+    descent-override: 30%;
+    src: url("./hd44780.woff2") format("woff2");
+}
+
+/*
+mdn recommends this syntax to override the default box-sizing for all elements
+developer.mozilla.org/en-US/docs/Learn/CSS/Building_blocks/The_box_model
+*/
+
+html {
+    box-sizing: border-box;
+}
+
+*, *::before, *::after {
+    box-sizing: inherit;
+}
+
+/*
+establish the size of the #app element. we want its width to be fixed (900px seems safe for
+tablets, as per screensizemap.com), producing a horizontal scrollbar if necessary. its height
+should be flexible: ideally the same height as the view (minus vertical margins), but clamped to
+a minimum and maximum range.
+
+a rule like #app { height: 100vh } would fail to take the horizontal scrollbar into account,
+creating an unnecessary vertical scrollbar under some circumstances. on the other hand, a rule
+like #app { height: 100% } would collapse to nothing, because the body defaults to a height of 0.
+our compromise is to vertically stretch the body to 100vh, scroll the body's children if they
+overflow (rather than scrolling the body within the `html` parent), then assign a height of 100%
+to our #app outer container.
+*/
+
+html {
+    margin: 0;
+    overflow: hidden;
+}
+
+body {
+    height: 100vh;
+    margin: 0;
+    overflow: auto;
+
+    //ideally these settings would give us dark scrollbars on firefox, but unfortunately
+    //it overrides the `background-color` with the `background` gradient, then ignores it
+    background-color: #171717;
+    background: radial-gradient(125% 175%, #222 20%, #000);
+}
+
+#app {
+    width: 900px;
+    height: 100%;
+    min-height: 500px;
+    max-height: 650px;
+    margin: 0 auto;
+
+    //using padding rather than margin here avoids weird right-margin
+    //collapsing when the #app overflows its parent horizontally
+    padding: 10px;
+
+    opacity: 100%;
+    transition: opacity 0.15s ease-out;
+}
+
+#app.before-fading-in {
+    opacity: 0%;
+}
+
+/*
+the "loading" or "error" messages, which might appear in place of the app
+*/
+
+#loading-or-error {
+    width: 50%;
+    height: 100%;
+    margin: 0 auto;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    > .loading,
+    > .error {
+        color: #bbb;
+        font: 14px sans-serif;
+        text-align: center;
+    }
+
+    > .error > .error-name {
+        font-weight: bold;
+    }
+
+    //we don't want to show the "loading" message if it's only going to appear for a few
+    //frames, because that's distracting. we delay its appearance by 0.75s instead
+    > .loading {
+        opacity: 0%;
+        animation:
+            loading-fade 0.5s linear 0.75s 1,
+            loading-cycle 0.5s linear 1.25s infinite alternate;
+    }
+}
+
+@keyframes loading-fade {
+    0% { opacity: 0%; }
+    100% { opacity: 75%; }
+}
+
+@keyframes loading-cycle {
+    0% { opacity: 75%; }
+    100% { opacity: 100%; }
+}
+
+/*
+the top-level grid layout
+*/
+
+//this border-thickness value should round to 1px at native resolution
+//and 2px with a devicePixelRatio of 1.5
+$border-thickness: 1.4px;
+
+#app-grid {
+    width: 100%;
+    height: 100%;
+
+    display: grid;
+    grid: 70px 1fr 100px / 225px 1fr 225px;
+    grid-template-areas:
+        "brd mid rgt"
+        "lft mid rgt"
+        "pno pno rgt";
+
+    background-color: #2c2c2c;
+    background-image: url("./background-texture.svg");
+    border-radius: 4px + $border-thickness;
+    overflow: clip;
+
+    /*
+    we can't use an actual `border` here without creating a double border around some children,
+    e.g. the top edge of the right column. excluding those borders from the children creates
+    artefacts on their rounded corners (they taper to a point). a box-shadow has roughly the
+    same visual effect, without the nesting issues
+    */
+
+    box-shadow: inset 0 0 0 $border-thickness black;
+
+    > .branding-cell {
+        grid-area: brd;
+
+        //generous padding, to make misclicks (e.g. the "operator" button) less likely
+        padding: 13px;
+    }
+
+    > .piano-cell {
+        grid-area: pno;
+
+        border: solid $border-thickness black;
+        border-right: none;
+        border-bottom-left-radius: 4px + $border-thickness;
+
+        .plastic-panel {
+            border-bottom-left-radius: 4px;
+
+            //to avoid a double border where two plastic panels meet
+            border-right: none;
+        }
+    }
+
+    > .left-column {
+        grid-area: lft;
+
+        border: solid $border-thickness black;
+        border-bottom: none;
+        border-radius: (4px + $border-thickness) (4px + $border-thickness) 0 0;
+
+        .plastic-panel {
+            border-radius: 4px 4px 0 0;
+
+            //to avoid a double border where two plastic panels meet
+            border-bottom: none;
+        }
+    }
+    
+    > .mid-column {
+        grid-area: mid;
+    }
+    
+    > .right-column {
+        grid-area: rgt;
+
+        border: solid $border-thickness black;
+        border-radius: (4px + $border-thickness);
+        border-bottom-left-radius: 0;
+
+        .plastic-panel {
+            border-radius: 4px 4px 4px 0;
+        }
+    }
+
+    //this rule is enabled for the #app-grid when the popup appears, to prevent text
+    //selection using, e.g. ctrl+a
+    &.obscured {
+        user-select: none;
+    }
+}
+
+/*
+the app's logo, at the top-left
+*/
+
+#branding {
+    width: 100%;
+    height: 100%;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+
+    user-select: none;
+    cursor: pointer;
+
+    &:hover > .logo {
+        filter: brightness(103%) drop-shadow(0 0 10px rgba(169, 169, 169, 0.4));
+    }
+}
+
+.logo {
+    width: 154px * 1.05;
+    height: 44px * 1.05;
+}
+
+/*
+the "plastic" visual style. grainy texture, 3d effect. note that the outer black borders
+are not included; they need to be provided by the panel's parent
+*/
+
+.plastic-panel {
+    //using rgba() here ensures that the highlights/shadows don't obscure the texture
+    $highlight: rgba(255, 255, 255, 0.11);
+    $shadow: rgba(0, 0, 0, 0.2);
+
+    width: 100%;
+    height: 100%;
+
+    background-color: #3d3d3d;
+    background: url("./plastic-panel.png");
+    background-size: calc(64px * math.div(2, 3));
+    border: solid $border-thickness;
+    border-color: $highlight $shadow $shadow $highlight;
+}
+
+/*
+the "lcd" visual style. greenish gradient, inset 3d effect, monospaced font with a shadow.
+unlike plastic panels, lcd panels have their own borders.
+*/
+
+.lcd-panel {
+    width: 100%;
+    height: 100%;
+
+    color: #222;
+    font: 9.5px "HD44780";
+    text-shadow: 1px 1px #5c6251, 1px 0 #5c6251, 0 1px #5c6251;
+
+    //our monospaced font lacks horizontal padding for selected text.
+    //couldn't find a good workaround...
+    &::selection,
+    *::selection {
+        color: #7c8771;
+        background-color: #222;
+        text-shadow: 1px 1px #484d3e, 1px 0 #484d3e, 0 1px #484d3e;
+    }
+
+    border: solid $border-thickness black;
+    border-color: black #333 #333 black;
+    border-radius: 4px;
+    background-color: #7c8771;
+    background: radial-gradient(100% 150% at 15% 25%, #727c67 20%, #656b5d 100%);
+    box-shadow: inset 2px 1px 3px #43473b,
+        inset -1px -1px 1px #43473b;
+
+    //a slightly more compact variation
+    &.small {
+        font-size: 9px;
+        box-shadow: inset 1px 0.5px 1.5px #43473b,
+            inset -0.5px -0.5px 0.5px #43473b;
+    }
+}
+
+/*
+column layout for the left and right panels, alternating between headings and content. headings
+always have a fixed height. content may have a fixed `height`, or may set the `flex` property to
+fill available space.
+*/
+
+.side-panel {
+    padding: 8px;
+    min-height: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    .heading {
+        height: 12px;
+        margin-top: 12px;
+        margin-bottom: 5px;
+
+        &:first-child {
+            margin-top: 0;
+        }
+
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 4px;
+    }
+}
+
+$heading-color: #9e9e9e;
+$heading-shadow: #222;
+$heading-shadow-px: 1px;
+
+.heading-label {
+    font: 400 10px "Roboto Subset";
+    color: $heading-color;
+    user-select: none;
+    text-shadow: $heading-shadow-px $heading-shadow-px $heading-shadow;
+}
+
+.heading-line {
+    flex: 1;
+
+    height: 1px;
+    background-color: #787878;
+    box-shadow: $heading-shadow-px $heading-shadow-px $heading-shadow;
+}
+
+/*
+buttons
+
+they default to acting as a horizontal flex container. with one child, it's centered; with
+multiply children, they're arranged as per `justify-content: space-between`
+*/
+
+.button {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px;
+
+    background-color: #575757;
+    background: url("./plastic-button.png");
+    background-size: calc(64px * math.div(2, 3));
+    border: solid $border-thickness #222;
+
+    //like windows xp, we have an etched shadow outside the button, and an embossed shadow
+    //within it. we use transparency so the button is adaptable to different backgrounds
+    $outer-box-shadows:
+        $border-thickness $border-thickness rgba(255, 255, 255, 0.05),
+        (-$border-thickness) (-$border-thickness) rgba(0, 0, 0, 0.1);
+
+    box-shadow:
+        inset $border-thickness $border-thickness rgba(255, 255, 255, 0.1),
+        inset (-$border-thickness) (-$border-thickness) rgba(0, 0, 0, 0.25),
+        $outer-box-shadows;
+
+    color: #a2a2a2;
+    font: 500 12px "Roboto Subset";
+    text-shadow: -1px -1px #333, 0 -1px #333, -1px 0 #333;
+    user-select: none;
+
+    > img {
+        filter: drop-shadow(0px -0.67px #333) drop-shadow(-0.67px 0px #333); 
+    }
+
+    //ensure that, if the button only has one child, it's centered rather than left-aligned
+    *:only-child {
+        margin: 0px auto;
+    }
+
+    &:hover {
+        filter: brightness(115%);
+    }
+
+    &:active {
+        filter: brightness(90%);
+        box-shadow:
+            inset $border-thickness $border-thickness rgba(0, 0, 0, 0.1),
+            inset (-$border-thickness) (-$border-thickness) rgba(255, 255, 255, 0.0),
+            $outer-box-shadows;
+
+        //this is a slightly cheeky way to achieve a vertical offset, but it hasn't caused any
+        //problems in practice. tried `padding-top`, but it tended to cause layout issues
+        > * {
+            position: relative;
+            top: 1px;
+        }
+    }
+
+    //variants for grouped buttons
+    &.no-top-edge {
+        border-top: none;
+    }
+
+    &.no-bottom-edge {
+        border-bottom: none;
+    }
+
+    &.no-left-edge {
+        border-left: none;
+    }
+
+    &.no-right-edge {
+        border-right: none;
+    }
+}
+
+/*
+glowing leds, usually seen on toggle buttons
+*/
+
+.led {
+    width: 7px;
+    height: 7px;
+
+    background-color: #333;
+    border: solid $border-thickness #222;
+    border-radius: 3.5px;
+
+    //variant where the led is illuminated
+    &.lit {
+        background-color: yellow;
+        background: radial-gradient(#d9e467 25%, #696d43);
+        border-color: #262621;
+        box-shadow: 0 0 4px yellow;
+    }
+}
+
+/*
+the "demo tracks" section in the left side-panel
+*/
+
+.demo-cell {
+    display: grid;
+    gap: 6px 0;
+    grid: 24px 30px / 36px 36px 1fr 64px;
+    grid-template-areas:
+        "prv nxt  .  ply"
+        "lcd lcd lcd lcd";
+
+    padding: 3px 0;
+
+    > .lcd-panel {
+        grid-area: lcd;
+        padding: 3px 10px;
+    }
+
+    > .demo-prev {
+        grid-area: prv;
+    }
+
+    > .demo-next {
+        grid-area: nxt;
+    }
+
+    > .demo-play {
+        grid-area: ply;
+    }
+
+    > .demo-prev img,
+    > .demo-next img {
+        width: 16px;
+        height: 16px;
+    }
+}
+
+.demo-name {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+
+    user-select: none;
+}
+
+/*
+the middle column, and its five rack slots
+*/
+
+.mid-column {
+    padding: 7px;
+
+    display: grid;
+    gap: 7px 0;
+    grid: 26px repeat(5, 1fr) / 110px 110px 1fr 36px 36px;
+    grid-template-areas:
+        "ops vrs  .  zmo zmi"
+        "rk0 rk0 rk0 rk0 rk0"
+        "rk1 rk1 rk1 rk1 rk1"
+        "rk2 rk2 rk2 rk2 rk2"
+        "rk3 rk3 rk3 rk3 rk3"
+        "rk4 rk4 rk4 rk4 rk4";
+
+    > .mid-operators {
+        grid-area: ops;
+    }
+
+    > .mid-variations {
+        grid-area: vrs;
+    }
+
+    > .mid-operators, > .mid-variations {
+        gap: 8px;
+        padding-left: 11px;
+        padding-right: 11px;
+    }
+
+    > .mid-zoom-in {
+        grid-area: zmi;
+    }
+
+    > .mid-zoom-out {
+        grid-area: zmo;
+    }
+
+    > .mid-zoom-in > img,
+    > .mid-zoom-out > img {
+        width: 13px;
+        height: 13px;
+    }
+}
+
+.rack-slot {
+    height: 100%;
+    min-height: 100%;
+    max-height: 100%;
+
+    background-color: #262626;
+    background: url("./plastic-inset.png");
+    background-size: calc(64px * math.div(2, 3));
+    border: solid $border-thickness black;
+    border-radius: 4px + $border-thickness;
+    box-shadow:
+        inset 1px 1px 5px rgba(0, 0, 0, 0.3),
+        inset -1px -1px 1px rgba(0, 0, 0, 0.15);
+
+    > .plastic-panel {
+        border-radius: 4px;
+    }
+
+    &:hover {
+        background-color: #2a2a2a;
+    }
+}
+
+/*
+the "operator" rack items
+*/
+
+.rack-operator {
+    padding: 7px;
+
+    display: grid;
+    grid: 1fr 1fr 1fr / 40px auto 66px 77px 1fr;
+    grid-gap: 0 8px;
+    grid-template-areas:
+        "ltr . . . env"
+        "ltr . . . env"
+        "btn . . . env";
+
+    > .rack-letter-container {
+        grid-area: ltr;
+
+        padding-top: 0px;
+        padding-bottom: 3px;
+
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        user-select: none;
+
+        > .rack-letter {
+            position: relative;
+            top: -1px;
+            
+            width: 25px;
+            height: 25px;
+
+            opacity: 25%;
+        }
+    }
+
+    > .rack-button-container {
+        grid-area: btn;
+        height: 100%;
+
+        > .button {
+            width: 100%;
+            height: 100%;
+            max-width: 28px;
+            margin: 0 auto;
+        }
+    }
+
+    > .rack-envelope {
+        grid-area: env;
+
+        overflow: clip;
+
+        > .rack-envelope-editor {
+            width: 100%;
+            height: 100%;
+
+            text-shadow: none;
+            user-select: none;
+        }
+    }
+}
+
+//a few style adjustments for disabled operators...
+.rack-operator.disabled {
+    .rack-letter {
+        opacity: 14%;
+    }
+
+    .label {
+        opacity: 70%;
+    }
+
+    .meter-fill {
+        opacity: 70%;
+    }
+
+    .parameter:not(:active):not(:hover) .parameter-with-units {
+        opacity: 70%;
+    }
+}
+
+/*
+the "variation" rack items
+*/
+
+.rack-variation {
+    padding: 0 12px;
+
+    display: grid;
+    grid-template-rows: 1fr auto 1fr auto 1fr;
+    grid-template-columns: auto 1fr auto 48px auto 48px auto;
+    grid-gap: 0 8px;
+    grid-template-areas:
+        " .   .   .   .   .   .   . "
+        "inl inc ifl iff itl itf del"
+        " .   .   .   .   .   .  del"
+        "oul ouc ofl off otl otf del"
+        " .   .   .   .   .   .   . ";
+
+    > .rack-delete-container {
+        grid-area: del;
+        height: 100%;
+        padding-left: 4px;
+
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+
+        > .button {
+            width: 28px;
+            height: 28px;
+            margin: auto 0;
+            padding: 0;
+
+            img {
+                width: 13px;
+                height: 13px;
+            }
+        }
+    }
+
+    > .input-label { grid-area: inl; }
+    > .input-choices { grid-area: inc; }
+    > .input-from-label { grid-area: ifl; }
+    > .input-from-field { grid-area: iff; }
+    > .input-to-label { grid-area: itl; }
+    > .input-to-field { grid-area: itf; }
+
+    > .output-label { grid-area: oul; }
+    > .output-choices { grid-area: ouc; }
+    > .output-from-label { grid-area: ofl; }
+    > .output-from-field { grid-area: off; }
+    > .output-to-label { grid-area: otl; }
+    > .output-to-field { grid-area: otf; }
+}
+
+.empty-rack-with-icon {
+    width: 100%;
+    height: 100%;
+
+    display: flex;
+    align-items: center;
+    justify-content: center;
+
+    user-select: none;
+
+    &:hover {
+        filter: brightness(115%);
+    }
+
+    &:active {
+        filter: brightness(130%);
+    }
+
+    > img {
+        width: 28px;
+        height: 28px;
+    }
+}
+
+.choices {
+    width: 100%;
+    min-height: 22px;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px;
+
+    user-select: none;
+
+    > .choice {
+        font-size: 8.5px;
+        padding: 0 3px;
+
+        &.single-letter {
+            padding: 0 5px;
+        }
+
+        &.single-letter:last-child {
+            padding-right: 3px;
+        }
+
+        &.selected {
+            color: #7c8771;
+            background-color: #222;
+            text-shadow: 1px 1px #484d3e, 1px 0 #484d3e, 0 1px #484d3e;
+        }
+
+        &:hover:not(.selected) {
+            background-color: rgba(0, 0, 0, 0.1);
+            filter: brightness(85%);
+        }
+
+        &:active:not(.selected) {
+            background-color: rgba(0, 0, 0, 0.16);
+            filter: brightness(75%);
+            box-shadow: inset 0 0 0 $border-thickness #404438;
+        }
+    }
+}
+
+.field {
+    min-height: 22px;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+
+    user-select: none;
+
+    &:hover {
+        filter: brightness(92%);
+    }
+
+    &:active {
+        filter: brightness(86%);
+    }
+}
+
+/*
+small labels, parameter text-fields and meters. used on rack slots and the lfo editor
+*/
+
+.label {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: end;
+
+    font: 400 10px "Roboto Subset";
+    color: $heading-color;
+    user-select: none;
+    text-shadow: $heading-shadow-px $heading-shadow-px $heading-shadow;
+}
+
+.parameter {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+
+    padding: 0 4px;
+
+    &:hover {
+        filter: brightness(92%);
+    }
+
+    &:active {
+        filter: brightness(86%);
+    }
+
+    > .parameter-with-units {
+        width: 100%;
+        height: auto;
+
+        display: flex;
+        flex-direction: row;
+        align-items: baseline;
+        justify-content: end;
+        gap: 3px;
+
+        user-select: none;
+
+        > .parameter-value {
+            flex: 0;
+            text-align: right;
+        }
+
+        > .parameter-units {
+            flex: 12px 0;
+            text-align: left;
+            font: bold 8.5px "Roboto Subset";
+        }
+    }
+}
+
+.meter {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: center;
+
+    > .meter-channel {
+        width: calc(100% - $border-thickness * 2);
+        height: 2px;
+
+        //without this, our fractional $border-thickness values will sometimes cause awkward
+        //rounding issues, where the .meter-fill elements appear taller than they should
+        box-sizing: content-box;
+
+        border-radius: 4px;
+        border: solid $border-thickness black;
+        background-color: #2c2c2c;
+
+        > .meter-fill {
+            height: 100%;
+
+            border-radius: 1px;
+            background-color: #b2ba56;
+            background: repeating-linear-gradient(
+                90deg,
+                #696d43 0px,
+                #939a48 0.5px,
+                #939a48 2px,
+                #696d43 2.5px,
+                #696d43 4px
+            );
+
+            box-shadow: 0 0 5px #b2ba5688;
+        }
+    }
+}
+
+/*
+the list of instruments in the left column
+*/
+
+.instrument-list {
+    flex: 1 0 0;
+    min-height: 0;
+    padding: 7px 0px;
+
+    overflow-y: auto;
+
+    text-transform: uppercase;
+}
+
+.instrument {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 6px;
+    padding: 3.5px 10px;
+
+    //prevent double borders when activating the item next to the current selection
+    margin-top: -$border-thickness;
+
+    border: solid $border-thickness rgba(0, 0, 0, 0.0);
+    border-style: solid none solid none;
+    user-select: none;
+
+    .instrument-name {
+        flex: 1;
+    }
+
+    &:hover {
+        background-color: rgba(0, 0, 0, 0.1);
+
+        img,
+        .instrument-name {
+            filter: brightness(85%);
+        }
+    }
+
+    &:active,
+    &.selected {
+        background-color: rgba(0, 0, 0, 0.16);
+        border: solid $border-thickness #404438;
+        border-style: solid none solid none;
+
+        img {
+            filter: brightness(75%);
+        }
+
+        .instrument-name {
+            filter: brightness(75%);
+        }
+    }
+
+    img {
+        width: 16px;
+        height: 16px;
+
+        &:hover {
+            filter: brightness(50%) drop-shadow(1px 1px #42463a);
+        }
+    }
+}
+
+.instrument-name {
+    color: inherit;
+    font: inherit;
+    text-shadow: inherit;
+    filter: inherit;
+    border: none;
+    background-color: transparent;
+    background: none;
+    cursor: inherit;
+    padding: 0;
+
+    &[disabled] {
+        pointer-events: none;
+    }
+
+    &:focus,
+    &:hover,
+    &:active {
+        border: none;
+        background-color: transparent;
+        background: none;
+        outline: none;
+    }
+}
+
+.copy-instrument:not(:hover):not(:active) {
+    color: #565a4c;
+    text-shadow: 1px 1px #5f6456, 0 1px 1px #5f6456, 1px 0 #5f6456;
+}
+
+/*
+the fm matrix
+*/
+
+.matrix-container {
+    flex: 1 0;
+}
+
+.matrix {
+    height: 100%;
+    min-height: 0;
+    max-height: 350px;
+
+    position: relative;
+    display: grid;
+    grid-template-rows: repeat(9, 11.1111111%);
+    grid-template-columns: repeat(4, 25%);
+    padding: 6px;
+}
+
+.matrix-cell {
+    border: solid $border-thickness #54594a;
+    border-style: none solid solid none;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    &:nth-child(4n) {
+        border-right-style: none;
+    }
+
+    &:nth-child(n+33) {
+        border-bottom-style: none;
+    }
+
+    &:hover > .matrix-number:not(.empty) {
+        background-color: rgba(0, 0, 0, 0.04);
+        filter: brightness(90%);
+    }
+
+    &:active > .matrix-number:not(.empty) {
+        background-color: rgba(0, 0, 0, 0.08);
+        filter: brightness(85%);
+    }
+
+    &:hover > .matrix-number.empty {
+        background-color: rgba(0, 0, 0, 0.16);
+    }
+}
+
+.matrix-letter {
+    width: 36px;
+    height: 18px;
+
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+
+    background-color: #222;
+    box-shadow: 1px 1px 0 #5c6251;
+    text-shadow: none;
+    user-select: none;
+
+    img {
+        width: 11px;
+        height: 11px;
+    }
+
+    &.disabled {
+        opacity: 40%;
+    }
+}
+
+.matrix-number {
+    width: 36px;
+    height: 18px;
+
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+
+    background-color: rgba(0, 0, 0, 0.08);
+    color: #222;
+    text-align: center;
+    user-select: none;
+
+    &:not(.empty) {
+        border: solid $border-thickness #222;
+        box-shadow: 1px 1px 0 #5c6251, inset 1px 1px 0 #5c6251;
+        background-color: transparent;
+    }
+}
+
+.matrix-arrows {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+
+    pointer-events: none;
+}
+
+/*
+the lfo parameters, in the right column
+*/
+
+.lfo-cell {
+    --parameter-height: 20px;
+    --parameter-gap: 0px;
+
+    padding-left: 4px;
+
+    display: grid;
+    grid-template-rows: 40px repeat(3, var(--parameter-height));
+    grid-template-columns: auto 66px 1fr;
+    grid-gap: var(--parameter-gap) 8px;
+
+    //without this tweak, meters look a little too wide
+    > .meter {
+        margin-right: 4px;
+    }
+}
+
+.wave-picker-container {
+    grid-column: auto / span 2;
+    padding-bottom: calc(6px - var(--parameter-gap));
+}
+
+.wave-picker {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px;
+
+    user-select: none;
+
+    img {
+        width: 28px;
+        height: 24px;
+
+        &:hover:not(.selected) {
+            background-color: rgba(0, 0, 0, 0.1);
+        }
+
+        &:active:not(.selected) {
+            background-color: rgba(0, 0, 0, 0.16);
+            box-shadow: inset 0 0 0 $border-thickness #404438;
+        }
+    }
+}
+
+/*
+the waveform visualiser
+*/
+
+.waveform {
+    height: 65px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+/*
+the piano, and associated wheels and buttons
+*/
+
+.piano-panel {
+    width: 100%;
+    height: 100%;
+
+    display: grid;
+    grid-template-rows: 100%;
+    grid-template-columns: auto auto 1fr auto;
+    padding: 8px 8px 0 8px;
+}
+
+.wheel-and-label {
+    width: 35px;
+    margin: 0 8px 8px 0;
+
+    display: grid;
+    grid-template-rows: auto 1fr;
+    grid-template-columns: 100%;
+    gap: 4px;
+}
+
+.wheel-label {
+    font: 400 10px "Roboto Subset";
+    color: $heading-color;
+    user-select: none;
+    text-shadow: $heading-shadow-px $heading-shadow-px $heading-shadow;
+    text-align: center;
+}
+
+.wheel {
+    --value: 0.5;
+    --notch-y-scale: 1.0;
+
+    width: 18px;
+    margin: $border-thickness auto;
+
+    position: relative;
+    overflow: clip;
+
+    //caution: if the repeating gradient's lines are too narrow, aliasing
+    //can cause them to look quite glitchy at some zoom levels
+    background:
+        repeating-linear-gradient(
+            rgba(0, 0, 0, 0.15) 0px,
+            rgba(0, 0, 0, 0.15) 1.5px,
+            rgba(255, 255, 255, 0.0) 2px,
+            rgba(255, 255, 255, 0.0) 3.5px,
+            rgba(0, 0, 0, 0.15) 4px,
+        ),
+        linear-gradient(
+            #636363 0%,
+            #5a5a5a 35%,
+            #5a5a5a 65%,
+            #505050 100%,
+        );
+    background-color: #5a5a5a;
+    border-radius: 2px / 35% 35% 65% 65%;
+    box-shadow:
+        0 0 0 $border-thickness black,
+        inset 2px 0 0 rgba(255, 255, 255, 0.1),
+        inset -2px 0 0 rgba(0, 0, 0, 0.25);
+}
+
+.wheel-notch {
+    $height-expr: calc(var(--notch-y-scale) * 14px);
+    $padding: 3px;
+
+    height: $height-expr;
+
+    position: absolute;
+    left: 0px;
+    right: 0px;
+    top: calc($padding + ((100% - (2 * $padding)) - $height-expr) * (1.0 - var(--value)));
+
+    background-color: #444;
+    background: linear-gradient(
+        #383838 0%,
+        #444 40%,
+        #444 60%,
+        #494949 100%,
+    );
+    border-top: solid $border-thickness black;
+    border-bottom: solid $border-thickness black;
+    filter: brightness(calc(110% - 25% * (1.0 - var(--value))));
+}
+
+.piano-keyboard {
+    width: 100%;
+    height: 100%;
+
+    display: grid;
+    grid-auto-flow: column;
+    grid-template-rows: 100%;
+    grid-auto-columns: auto;
+    position: relative;
+
+    border: solid $border-thickness black;
+    border-right-color: #333;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    overflow: clip;
+
+    //an inset drop shadow for the top, left and right edges
+    &:after {
+        position: absolute;
+        content: "";
+        pointer-events: none;
+
+        border-radius: (4px - $border-thickness) (4px - $border-thickness) 0 0;
+        top: 0;
+        bottom: -4px;
+        left: 0;
+        right: 0;
+        box-shadow: inset 0 0 $border-thickness ($border-thickness * 2) rgba(0, 0, 0, 0.15);
+    }
+}
+
+.piano-key-pair {
+    position: relative;
+
+    &:first-child > .piano-white-key {
+        border-left-color: rgba(0, 0, 0, 0.0);
+    }
+
+    &:last-child > .piano-white-key {
+        border-right-color: rgba(0, 0, 0, 0.0);
+    }
+}
+
+.piano-white-key {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+
+    --start-color: #777777;
+    --mid-color: #878787;
+    --end-color: #707070;
+    --end-percent: 90%;
+
+    background-color: #b4b4b4;
+    background: linear-gradient(
+        var(--start-color) 0%,
+        var(--mid-color) 15%,
+        var(--mid-color) calc(var(--end-percent) - 2%),
+        var(--end-color) var(--end-percent)
+    );
+    border-left: solid $border-thickness rgba(255, 255, 255, 0.2);
+    border-right: solid $border-thickness rgba(0, 0, 0, 0.6);
+
+    > .piano-shortcut {
+        position: absolute;
+        left: 0px;
+        right: 0px;
+        bottom: calc((100% - var(--end-percent)) + 6px);
+
+        text-align: center;
+        user-select: none;
+        font: 500 10px "Roboto Subset";
+        color: #363636;
+        text-shadow: 1px 1px rgba(255, 255, 255, 0.2);
+    }
+
+    &:hover:not(.down) {
+        --start-color: #888888;
+        --mid-color: #9b9b9b;
+        --end-color: #808080;
+    }
+
+    &.down {
+        --start-color: #5c5c5c;
+        --mid-color: #707070;
+        --end-color: #555555;
+        --end-percent: 96%;
+
+        border-left-color: rgba(0, 0, 0, 0.0);
+
+        > .piano-shortcut {
+            //top: 74%;
+            text-shadow: 1px 1px rgba(255, 255, 255, 0.1);
+        }
+    }
+}
+
+.piano-black-key-border {
+    position: absolute;
+    width: 65%;
+    top: 0px;
+    height: 62%;
+    z-index: 2;
+
+    background-color: black;
+    border: solid $border-thickness black;
+    border-top: none;
+}
+
+.piano-black-key {
+    position: absolute;
+    top: 0px;
+    bottom: 0px;
+    left: 0px;
+    right: 0px;
+
+    background-color: #353535;
+    border-left: solid (2 * $border-thickness) #444;
+    border-right: solid (2 * $border-thickness) #222;
+    border-bottom: solid 7px #282828;
+
+    > .piano-shortcut {
+        position: absolute;
+        left: 0px;
+        right: 0px;
+        bottom: 3px;
+
+        text-align: center;
+        user-select: none;
+        font: 500 9.5px "Roboto Subset";
+        color: #888;
+        text-shadow: -1px -1px black;
+    }
+
+    &:hover:not(.down) {
+        filter: brightness(125%);
+    }
+
+    &.down {
+        filter: brightness(75%);
+        border-bottom-width: 3px;
+    }
+}
+
+.piano-octaves {
+    width: 54px;
+    margin: 0 0 8px 8px;
+
+    display: grid;
+    grid-template-rows:
+        calc(25% + math.div($border-thickness, 2))
+        repeat(2, calc(25% - math.div($border-thickness, 2)))
+        calc(25% + math.div($border-thickness, 2));
+
+    > .button {
+        font-size: 11px;
+        font-style: oblique 5deg;
+        padding: 0 8px 0 6px;
+
+        > .led {
+            transform: scale(100%);
+        }
+    }
+}
+
+/*
+the popup dialog
+*/
+
+#popup-overlay {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+
+    pointer-events: none;
+    opacity: 0%;
+    transition: opacity 0.2s linear;
+
+    &.displayed {
+        pointer-events: auto;
+        opacity: 100%;
+    }
+
+    &.displayed #popup {
+        transform: translateY(0px);
+    }
+
+    &.hidden {
+        visibility: hidden;
+    }
+}
+
+#popup-shade {
+    width: 100%;
+    height: 100%;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+
+    background-color: rgba(0, 0, 0, 0.8);
+}
+
+#popup {
+    width: 500px;
+    height: 370px;
+    padding: 8px;
+
+    display: grid;
+    grid-template-columns: 1fr auto;
+    grid-template-rows: auto 1fr;
+    grid-template-areas:
+        "tbs cls"
+        "scr scr";
+
+    font: 400 15.5px "Roboto Subset";
+    color: #444;
+
+    background-color: #8e9a89;
+    border-radius: 8px;
+    overflow: clip;
+
+    transform: translateY(16px);
+    transition: transform 0.2s linear;
+
+    > .popup-tabs {
+        grid-area: tbs;
+    }
+
+    > .popup-close {
+        grid-area: cls;
+    }
+
+    > .popup-scrollview {
+        grid-area: scr;
+    }
+
+    a,
+    a:visited {
+        color: #5a7359;;
+        text-decoration: none;
+
+        &:hover {
+            text-decoration: underline;
+        }
+    }
+}
+
+.popup-tabs {
+    display: flex;
+    flex-direction: row;
+    gap: 6px;
+}
+
+.popup-tab {
+    padding: 6px 16px (4px + 8px) 16px;
+    margin-bottom: -8px;
+
+    background-color: #b4b4b4;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    user-select: none;
+
+    &.selected {
+        color: #333;
+        font-weight: 500;
+        background-color: #ccc;
+    }
+
+    &:hover:not(.selected),
+    &:active:not(.selected) {
+        color: #333;
+        background-color: #bbb;
+    }
+}
+
+.popup-close {
+    padding: 2px 5px 0px 4px;
+
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: start;
+
+    font-weight: bold;
+    font-size: 1.1em;
+    cursor: pointer;
+    user-select: none;
+
+    > img {
+        width: 20px;
+        height: 20px;
+
+        //silly hack: rotate the plus-sign icon
+        transform: rotate(45deg);
+    }
+
+    &:hover,
+    &:active {
+        filter: brightness(50%);
+    }
+}
+
+.popup-scrollview {
+    background-color: #ccc;
+    border-radius: 6px;
+    padding: 35px;
+
+    overflow-y: auto;
+
+    p {
+        color: #222;
+
+        margin-top: 0;
+        margin-bottom: 1.0em;
+        line-height: 1.4em;
+        text-align: justify;
+        word-spacing: 2px;
+    }
+
+    p:last-child {
+        margin-bottom: 0;
+    }
+}
+
+/*
+compressed or expanded layouts, for different monitor sizes
+
+we try to make the parameters in the lfo match those in the operator
+rack; it feels wrong otherwise
+*/
+
+@media (max-height: 550px) {
+    .mid-column {
+        padding: 4px;
+        gap: 4px 0;
+    }
+
+    .rack-operator {
+        padding: 4px;
+    
+        > .rack-letter-container > .rack-letter {
+            width: 23px;
+            height: 23px;
+        }
+    }
+
+    .lfo-cell {
+        --parameter-height: 18.5px;
+    }
+}
+
+@media (min-height: 620px) {
+    .rack-operator {
+        row-gap: 6px;
+    
+        > .rack-letter-container > .rack-letter {
+            width: 30px;
+            height: 30px;
+        }
+    }
+
+    .lfo-cell {
+        --parameter-gap: 6px;
+    }
+}

@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <meta charset="utf-8" />
+
+        <link rel="icon" href="./favicon-16.png" sizes="16x16" type="image/png">
+        <link rel="icon" href="./favicon-24.png" sizes="24x24" type="image/png">
+        <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
+        <title>Synth80</title>
+
+        <link rel="preload" href="./app.js" as="script">
+        <link rel="preload" href="./react.js" as="script">
+        <link rel="preload" href="./react-dom.js" as="script">
+        <!-- there currently seems to be no way to preload audioWorklet.js... -->
+
+        <link rel="preload" href="./roboto-regular.subset.woff2" as="font" crossorigin>
+        <link rel="preload" href="./roboto-medium.subset.woff2" as="font" crossorigin>
+        <link rel="preload" href="./hd44780.woff2" as="font" crossorigin>
+
+        <link rel="preload" href="./background-texture.svg" as="image">
+        <link rel="preload" href="./icons.svg" as="image">
+        <link rel="preload" href="./logo.svg" as="image">
+        <link rel="preload" href="./plastic-button.png" as="image">
+        <link rel="preload" href="./plastic-inset.png" as="image">
+        <link rel="preload" href="./plastic-panel.png" as="image">
+
+        <link
+            rel="preload"
+            data-label="arabesque (doonan)"
+            href="./doonan-arabesque-1.mid"
+            as="fetch"
+            crossorigin>
+        <link
+            rel="preload"
+            data-label="february (tchaikovsky)"
+            href="./tschaikovsky-february-op37-2.mid"
+            as="fetch"
+            crossorigin>
+        <link
+            rel="preload"
+            data-label="promenade (mussorgsky)"
+            href="./mussorgsky-promenade.mid"
+            as="fetch"
+            crossorigin>
+        <link
+            rel="preload"
+            data-label="sonata no. 28 (haydn)"
+            href="./haydn-presto-hob-xvi-28-iii.mid"
+            as="fetch"
+            crossorigin>
+
+        <link href="./style.css" rel="stylesheet" />
+        <script src="live.js"></script>
+        <script data-main="app" src="./require.js"></script>
+    </head>
+    <body>
+        <div id="loading-or-error">
+            <div class="loading">Downloading resources...</div>
+            <div class="error" style="display: none">
+                <span class="error-name"></span>
+                <span class="error-message"></span>
+            </div>
+        </div>
+        <div id="app" class="before-fading-in" style="display: none"></div>
+    </body>
+</html>
