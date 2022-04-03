@@ -5,8 +5,8 @@ It was developed in March 2022 as a portfolio piece.
 
 **To build**: see `./build.py --help`
 
-**To run**: navigate to the dst directory and run `http-server -c-1`, then visit the
-IP/port which the `http-server` prints to stdout.
+**To run locally**: navigate to the `dst` directory and run `http-server -c-1`, then visit the
+IP/port which the `http-server` printed to standard output
 
 ## License
 
