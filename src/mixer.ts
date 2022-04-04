@@ -195,34 +195,43 @@ export class Mixer {
         voice.onEnd = () => delete this.voices[voiceKey];
 
         /*
-        if this took us above MAX_POLYPHONY, find the oldest extant voice, force-stop it,
-        and remove it from this.voices
+        if this took us above MAX_POLYPHONY, find an appropriate extant voice, force-stop it,
+        and remove it from this.voices.
+
+        we prefer to force-stop released voices rather than ones which are currently sustaining.
+        within those categories, we select the oldest available voice.
         */
 
         let maxPolyphony = this.ctx.state === "suspended" ? 1 : MAX_POLYPHONY;
 
         let allVoiceKeys = Object.keys(this.voices);
         while (allVoiceKeys.length > maxPolyphony) {
-            //find the oldest voice
-            let oldestVoiceKey = allVoiceKeys[0];
-            let oldestVoiceNoteDownTime = this.voices[oldestVoiceKey].noteDownTime;
+            //find the most appropriate voice
+            let bestVoiceKey = allVoiceKeys[0];
+            let bestVoiceIsSustaining = this.voices[bestVoiceKey].state === "sustaining";
+            let bestVoiceNoteDownTime = this.voices[bestVoiceKey].noteDownTime;
 
             for (let i=1; i<allVoiceKeys.length; i++) {
                 let voiceKey = allVoiceKeys[i];
+                let voiceIsSustaining = (this.voices[voiceKey].state === "sustaining");
                 let voiceNoteDownTime = this.voices[voiceKey].noteDownTime;
 
-                if (voiceNoteDownTime < oldestVoiceNoteDownTime) {
-                    oldestVoiceKey = voiceKey;
-                    oldestVoiceNoteDownTime = voiceNoteDownTime;
+                if (
+                    (!voiceIsSustaining && bestVoiceIsSustaining) ||
+                    voiceNoteDownTime < bestVoiceNoteDownTime
+                ) {
+                    bestVoiceKey = voiceKey;
+                    bestVoiceIsSustaining = voiceIsSustaining;
+                    bestVoiceNoteDownTime = voiceNoteDownTime;
                 }
             }
 
             //force-stop it and delete it
-            let oldestVoice = this.voices[oldestVoiceKey];
-            oldestVoice.onEnd = null;
-            oldestVoice.forceStop();
+            let bestVoice = this.voices[bestVoiceKey];
+            bestVoice.onEnd = null;
+            bestVoice.forceStop();
 
-            delete this.voices[oldestVoiceKey];
+            delete this.voices[bestVoiceKey];
 
             //check whether this deletion has taken us below MAX_POLYPHONY...
             allVoiceKeys = Object.keys(this.voices);
