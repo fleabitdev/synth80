@@ -143,20 +143,6 @@ export class Mixer {
             },
             60,
         );
-
-        /*
-        twice per second, send a "ping" message to all extant voices. see audioWorklet.ts
-        for the rationale
-        */
-
-        window.setInterval(
-            () => {
-                for (let voiceKey in this.voices) {
-                    this.voices[voiceKey].ping();
-                }
-            },
-            1000 * PING_INTERVAL_SECONDS,
-        );
     }
 
     /*
@@ -406,16 +392,10 @@ class Voice {
             this.state = "released";
             this.noteUpTime = this.ctx.currentTime;
 
-            this.node.port.postMessage({
-                messageType: "release",
-                noteUpTime: this.noteUpTime,
-            });
-        }
-    }
-
-    ping() {
-        if (this.state !== "ended") {
-            this.node.port.postMessage({ messageType: "ping" });
+            let parameter = this.node.parameters.get("mixerState")!;
+            if (parameter.value === AW_STATE_SUSTAINING) {
+                parameter.value = AW_STATE_RELEASED;
+            }
         }
     }
 
@@ -423,11 +403,13 @@ class Voice {
         if (!this.sentForceStop) {
             this.sentForceStop = true;
 
+            let parameter = this.node.parameters.get("mixerState")!;
+            parameter.setValueAtTime(
+                AW_STATE_FORCE_STOPPED,
+                forceStopTime || this.ctx.currentTime,
+            );
+
             //after the voice actually stops, our "ended" message handler will change this.state
-            this.node.port.postMessage({
-                messageType: "forceStop",
-                forceStopTime: forceStopTime || this.ctx.currentTime,
-            });
         }
     }
 }
@@ -447,4 +429,6 @@ export interface AwConstructorArgs {
 
 //caution: if you change these, also change the definition in audioWorklet.ts
 export const MODULATION_WEIGHT = 2.8;
-export const PING_INTERVAL_SECONDS = 0.5;
+const AW_STATE_SUSTAINING = 0;
+const AW_STATE_RELEASED = 1;
+const AW_STATE_FORCE_STOPPED = 2;

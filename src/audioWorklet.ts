@@ -4,6 +4,7 @@ declare class AudioWorkletProcessor {
 };
 declare function registerProcessor(..._: any[]): void;
 declare var currentTime: number;
+declare var currentFrame: number;
 declare var sampleRate: number;
 
 type Instrument = any;
@@ -26,20 +27,29 @@ factor of two?), then downsample the output. i think (?) it's fine to just downs
 averaging neighbouring samples, rather than using something like windowed sinc. however,
 oversampling would still carry significant performance cost and complexity cost.
 
-bug: at least on chrome (plausibly also firefox?), each VoiceProcessor will leak after it's
-finished, using up about 3kb of memory and a tiny fraction of the cpu. chrome reports about 5%
-"render capacity" usage for about 1500 leaked voices; this causes noticeable midi desync after
+browser bug: at least on chrome (plausibly also firefox?), each VoiceProcessor will leak after
+it's finished, using up about 3kb of memory and a tiny fraction of the cpu. chrome reports about
+5% "render capacity" usage for about 1500 leaked voices; this causes noticeable midi desync after
 several minutes of use. can be reasonably confident that the culprit is a known bug in chrome, 
 rather than anything we're doing:
     
     https://bugs.chromium.org/p/chromium/issues/detail?id=1298955
+
+browser bug: when the audio worker thread is overloaded, both chrome and firefox will heavily
+delay AudioWorkletProcessor constructor calls and "message" events - sometimes by tens of seconds!
+this can create a downward spiral, where an overloaded thread can't receive "release" or
+"forceStop" messages, and in the meantime a huge backlog of new notes gradually trickles in.
+there's no way to detect this situation programmatically, because the overload may put the worker
+thread at just over 100% capacity, so there's no observable time-lag in audio rendering. this
+effectively forces us to perform any main-thread-to-worker-thread communication using an
+AudioParam, rather than using the MessagePort.
 */
 
 //caution: if you change these, also change the definition in mixer.ts
 const MODULATION_WEIGHT = 2.8;
-const PING_INTERVAL_SECONDS = 0.5;
-
-const PING_EXPECTED_SAMPLES = sampleRate * PING_INTERVAL_SECONDS;
+const AW_STATE_SUSTAINING = 0;
+const AW_STATE_RELEASED = 1;
+const AW_STATE_FORCE_STOPPED = 2;
 
 //the minimum amount of time, in seconds, over which any sharp transition should
 //be smoothed out. this helps to avoid clicks and pops
@@ -84,24 +94,6 @@ class VoiceProcessor extends AudioWorkletProcessor {
 
     fadeGain = 0;
     fadeRate = MAX_VOLUME / (MIN_TRANSITION_TIME * sampleRate);
-
-    /*
-    if the audio thread receives more work than it can handle, it will stall, emit noise, and
-    potentially starve the main thread. to make this (slightly) more recoverable, we try to detect
-    when the worker thread or main thread are stalled, in which case we kill ongoing voices.
-
-    the main thread sends a "ping" message to all voices twice per second. if a voice has produced
-    twice as many samples as expected before receiving another ping, the main thread seems to
-    be stalled, so the voice stops. if it's produced half as many samples as expected between two
-    pings, the audio thread seems to be stalled, so the voice stops.
-
-    todo?: ideally we'd do something about the noise; it's currently forcing us to reduce
-    MAX_POLYPHONY to a brutally low level. i think the only solution would be to improve the
-    performance of the audio worklet (which would take a lot of engineering effort...)
-    */
-
-    samplesSinceLastPing: number | null = null;
-    audioStarvedPings = 0;
 
     constructor(options: { processorOptions: AwConstructorArgs }) {
         super(options);
@@ -163,35 +155,9 @@ class VoiceProcessor extends AudioWorkletProcessor {
     
         /*
         caution: for whatever reason, MessagePort requires you to explicitly enable the flow
-        of events (by calling start()) when using addEventListener, but not when assigning to
-        the `onmessage` property
+        of events (by calling start()) when receiving events via addEventListener, but not whe
+        assigning to the `onmessage` property
         */
-
-        this.port.addEventListener("message", ({ data }) => {
-            if (data.messageType === "release") {
-                this.noteUpTime = data.noteUpTime;
-                for (let envelope of this.envelopes) {
-                    envelope.release(data.noteUpTime);
-                }
-            }
-
-            if (data.messageType === "forceStop") {
-                this.fadeOutTime = data.forceStopTime;
-            }
-
-            if (data.messageType === "ping") {
-                if (
-                    this.samplesSinceLastPing !== null
-                    && this.samplesSinceLastPing < PING_EXPECTED_SAMPLES * 0.5
-                ) {
-                    this.audioStarvedPings += 1;
-                } else {
-                    this.audioStarvedPings = 0;
-                }
-
-                this.samplesSinceLastPing = 0;
-            }
-        });
 
         this.port.start();
 
@@ -438,7 +404,20 @@ class VoiceProcessor extends AudioWorkletProcessor {
     bringing it all together...
 
     other than the operators, we calculate everything with k-rate precision: we find the values
-    at the start and end of the block, then lerp between them by repeated addition
+    at the start and end of the block, then lerp between them by repeated addition.
+
+    if the audio-rendering thread is overloaded, notes will artificially last much longer than
+    they should. this is because envelopes advance by a fixed time step in each progress() call,
+    and lag causes those calls to become less frequent. this can lead to a downward spiral. we
+    compensate for this by using Date.now() to detect when the audio context time lags behind
+    realtime, in which case all actual audio synthesis is silenced so that we can "catch up".
+
+    for a bit of extra peace of mind, we force-stop all voices if we're lagging extremely far
+    behind realtime, and we prevent voices from being created at all if the number of ongoing
+    voices is several times greater than MAX_POLYPHONY.
+    
+    todo?: this strategy will fail if firefox's resistFingerprinting setting is enabled, because
+    it changes the precision of Date.now() from 2ms to 100ms. unsure how to work around this.
     */
 
     //scratch buffers, to avoid allocation
@@ -447,12 +426,69 @@ class VoiceProcessor extends AudioWorkletProcessor {
     scratchEnvelope = [0, 0, 0, 0];
     scratchEnvelopeInc = [0, 0, 0, 0];
 
+    //after we return `false` once, we want to be sure that no further processing will occur
+    processReturnedFalse = false;
+
+    //the time of the first process() call in realtime (converted to seconds), and in the
+    //AudioContext coordinate space
+    startRealTime: number | null = null;
+    startCtxTime: number | null = null;
+
+    lastSeenMixerState = AW_STATE_SUSTAINING;
+
+    static get parameterDescriptors() {
+        return [
+            {
+                name: "mixerState",
+                automationRate: "k-rate",
+                defaultValue: AW_STATE_SUSTAINING,
+            }
+        ];
+    }
+
     process (
         inputs: Float32Array[][],
         outputs: Float32Array[][],
         parameters: Record<string, Float32Array>
     ) {
         const mono = outputs[0][0];
+        const mixerState: number = parameters["mixerState"][0];
+
+        /*
+        if the node should have ended already, do nothing
+        */
+
+        if (this.processReturnedFalse) {
+            return false;
+        }
+
+        /*
+        handle state transitions
+        */
+
+        if (this.lastSeenMixerState !== mixerState) {
+            if (mixerState === AW_STATE_RELEASED) {
+                this.noteUpTime = currentTime;
+                for (let envelope of this.envelopes) {
+                    envelope.release(currentTime);
+                }
+            }
+
+            if (mixerState === AW_STATE_FORCE_STOPPED) {
+                this.fadeOutTime = currentTime;
+            }
+        }
+
+        this.lastSeenMixerState = mixerState;
+
+        /*
+        if this is the first call to process(), start measuring elapsed time
+        */
+
+        if (this.startRealTime === null) {
+            this.startRealTime = Date.now() * 0.001;
+            this.startCtxTime = currentTime;
+        }
 
         /*
         find start/end values for various parameters
@@ -485,42 +521,57 @@ class VoiceProcessor extends AudioWorkletProcessor {
         }
 
         /*
-        set up iterators
+        if there's too much lag, mute audio synthesis. the spec guarantees that output buffers
+        are zero-initialised.
         */
 
-        let recipNumSamples = 1 / mono.length;
+        const CATCHUP_LAG = 0.1;
+        const FATAL_LAG = 1.0;
 
-        let time = startTime;
-        let timeInc = (endTime - startTime) * recipNumSamples;
+        let currentRealTime = Date.now() * 0.001;
+        let currentCtxTime = currentTime;
 
-        let lfo = startLfo;
-        let lfoInc = (endLfo - startLfo) * recipNumSamples;
+        let lag = (currentRealTime - this.startRealTime!) - (currentCtxTime - this.startCtxTime!);
 
-        let fadeGain = startFadeGain;
-        let fadeGainInc = (endFadeGain - startFadeGain) * recipNumSamples;
+        if (lag <= CATCHUP_LAG) {
+            /*
+            set up iterators
+            */
 
-        for (let opI = 0; opI < 4; opI++) {
-            this.scratchEnvelope[opI] = this.scratchStartEnvelope[opI];
-            this.scratchEnvelopeInc[opI] =
-                (this.scratchEndEnvelope[opI] - this.scratchStartEnvelope[opI]) * recipNumSamples;
-        }
+            let recipNumSamples = 1 / mono.length;
 
-        /*
-        generate samples
-        */
+            let time = startTime;
+            let timeInc = (endTime - startTime) * recipNumSamples;
 
-        for (let i = 0; i < mono.length; i++) {
-            let sample = this.advanceOperators(lfo, this.scratchEnvelope);
+            let lfo = startLfo;
+            let lfoInc = (endLfo - startLfo) * recipNumSamples;
 
-            mono[i] = sample * fadeGain;
+            let fadeGain = startFadeGain;
+            let fadeGainInc = (endFadeGain - startFadeGain) * recipNumSamples;
 
-            time += timeInc;
-            lfo += lfoInc;
-            fadeGain += fadeGainInc;
-            this.scratchEnvelope[0] += this.scratchEnvelopeInc[0];
-            this.scratchEnvelope[1] += this.scratchEnvelopeInc[1];
-            this.scratchEnvelope[2] += this.scratchEnvelopeInc[2];
-            this.scratchEnvelope[3] += this.scratchEnvelopeInc[3];
+            for (let opI = 0; opI < 4; opI++) {
+                this.scratchEnvelope[opI] = this.scratchStartEnvelope[opI];
+                this.scratchEnvelopeInc[opI] =
+                    (this.scratchEndEnvelope[opI] - this.scratchStartEnvelope[opI]) * recipNumSamples;
+            }
+
+            /*
+            generate samples
+            */
+
+            for (let i = 0; i < mono.length; i++) {
+                let sample = this.advanceOperators(lfo, this.scratchEnvelope);
+
+                mono[i] += sample * fadeGain;
+
+                time += timeInc;
+                lfo += lfoInc;
+                fadeGain += fadeGainInc;
+                this.scratchEnvelope[0] += this.scratchEnvelopeInc[0];
+                this.scratchEnvelope[1] += this.scratchEnvelopeInc[1];
+                this.scratchEnvelope[2] += this.scratchEnvelopeInc[2];
+                this.scratchEnvelope[3] += this.scratchEnvelopeInc[3];
+            }
         }
 
         /*
@@ -545,14 +596,7 @@ class VoiceProcessor extends AudioWorkletProcessor {
             ending = true;
         }
 
-        if (this.samplesSinceLastPing !== null) {
-            this.samplesSinceLastPing += mono.length;
-            if (this.samplesSinceLastPing >= PING_EXPECTED_SAMPLES * 2) {
-                ending = true;
-            }
-        }
-
-        if (this.audioStarvedPings >= 2) {
+        if (lag >= FATAL_LAG) {
             ending = true;
         }
 
@@ -567,6 +611,7 @@ class VoiceProcessor extends AudioWorkletProcessor {
 
             this.port.close();
 
+            this.processReturnedFalse = true;
             return false;
         }
 
