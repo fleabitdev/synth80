@@ -393,7 +393,7 @@ class Voice {
             this.noteUpTime = this.ctx.currentTime;
 
             let parameter = this.node.parameters.get("mixerState")!;
-            if (parameter.value === AW_STATE_SUSTAINING) {
+            if (parameter.value === AW_STATE_SUSTAINING && !this.sentForceStop) {
                 parameter.value = AW_STATE_RELEASED;
             }
         }
